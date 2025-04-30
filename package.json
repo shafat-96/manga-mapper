@@ -1,0 +1,30 @@
+{
+  "name": "anilist-app",
+  "version": "1.0.0",
+  "description": "Application using Consumet API for Anilist integration",
+  "main": "index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@consumet/extensions": "github:consumet/consumet.ts",
+    "cheerio": "^1.0.0",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "node-fetch": "^2.6.9"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "keywords": [
+    "anilist",
+    "anime",
+    "manga",
+    "consumet",
+    "api"
+  ],
+  "author": "",
+  "license": "MIT"
+}
