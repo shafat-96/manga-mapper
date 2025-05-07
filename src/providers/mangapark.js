@@ -139,8 +139,11 @@ class MangaParkProvider {
         genres.push($(el).text().trim());
       });
       
-      // Extract chapters
+      // Extract chapters with improved detection
       const chapters = [];
+      const chapterMap = new Map(); // Use a map to track unique chapter numbers
+      
+      // First pass - extract all chapter elements with their numbers
       $('div[data-name="chapter-list"] a').each((i, el) => {
         const chapterHref = $(el).attr('href');
         if (!chapterHref) return;
@@ -148,30 +151,161 @@ class MangaParkProvider {
         const chapterText = $(el).text().trim();
         let chapterNum = null;
         
-        // Extract chapter number from text like "Chapter 151"
+        // Extract chapter number from text like "Chapter 151" - more robust pattern
         const chapterMatch = chapterText.match(/Chapter\s+(\d+\.?\d*)/i);
         if (chapterMatch) {
           chapterNum = parseFloat(chapterMatch[1]);
+        } else {
+          // Try alternative formats like "Ch. 123" or "Ch 123"
+          const altMatch = chapterText.match(/Ch\.?\s*(\d+\.?\d*)/i);
+          if (altMatch) {
+            chapterNum = parseFloat(altMatch[1]);
+          } else {
+            // Try to extract just a number if it's the only number in the string
+            const numMatch = chapterText.match(/(\d+\.?\d*)/);
+            if (numMatch && numMatch.length === 2) {
+              chapterNum = parseFloat(numMatch[1]);
+            }
+          }
         }
+        
+        // Skip if we couldn't extract a chapter number
+        if (chapterNum === null) return;
 
         // Get the chapter container div to extract time info
         const chapterDiv = $(el).closest('.px-2.py-2');
         const timeElement = chapterDiv.find('time span');
         const date = timeElement.text().trim();
         
-        chapters.push({
-          id: `chapter-${chapterNum}`,
+        // Extract the unique chapter ID from the URL - this is the important part for MangaPark
+        // The format can be one of these patterns:
+        // - /title/87295-en-eleceed/9605874-chapter-345
+        // - /title/87295-en-eleceed/2797954-ch-227
+        // - /title/11784-en-berserk/7707927-volume-19-chapter-166
+        let uniqueChapterId = '';
+        const hrefParts = chapterHref.split('/');
+        
+        // Get the last part of the URL which should contain the chapter identifier
+        if (hrefParts.length > 0) {
+          const lastPart = hrefParts[hrefParts.length - 1];
+          // Check if it matches known patterns
+          if (lastPart.match(/\d+-chapter-\d+/) || 
+              lastPart.match(/\d+-ch-\d+/) || 
+              lastPart.match(/\d+-volume-\d+-chapter-\d+/)) {
+            uniqueChapterId = lastPart;
+          }
+        }
+        
+        // If we couldn't extract a unique ID, use a generic format with the chapter number
+        if (!uniqueChapterId) {
+          uniqueChapterId = `chapter-${chapterNum}`;
+        }
+        
+        const chapter = {
+          id: uniqueChapterId, // Use the extracted unique ID instead of just chapter-N
           title: chapterText,
-          number: chapterNum?.toString() || '',
+          number: chapterNum.toString(),
           url: chapterHref.startsWith('/') ? `${this.baseUrl}${chapterHref}` : chapterHref,
-          date: date
-        });
+          date: date || 'Unknown'
+        };
+        
+        // Track unique chapter numbers - keep the latest upload if duplicates exist
+        if (!chapterMap.has(chapterNum) || !chapterMap.get(chapterNum).date === 'Unknown') {
+          chapterMap.set(chapterNum, chapter);
+        }
       });
+      
+      // Convert map values to array
+      const extractedChapters = Array.from(chapterMap.values());
+      
+      // Find the highest chapter number to generate a complete sequence if needed
+      let highestChapterNum = 0;
+      for (const chapter of extractedChapters) {
+        const num = parseFloat(chapter.number);
+        if (!isNaN(num) && num > highestChapterNum) {
+          highestChapterNum = num;
+        }
+      }
+      
+      console.log(`Highest chapter number found: ${highestChapterNum}`);
+      
+      // Check if we need to generate missing chapters
+      const shouldGenerateChapters = highestChapterNum > 0 && extractedChapters.length < highestChapterNum / 2;
+      
+      if (shouldGenerateChapters) {
+        console.log(`Generating complete chapter sequence (1-${highestChapterNum})`);
+        
+        // Generate all chapters from 1 to highestChapterNum
+        for (let i = 1; i <= highestChapterNum; i++) {
+          if (!chapterMap.has(i)) {
+            // Check if we can construct a URL for this chapter based on existing chapters
+            let chapterUrl = "";
+            let generatedId = `chapter-${i}`;
+            
+            // Try to find a template from existing chapters with similar numbers
+            const nearbyChapters = extractedChapters.filter(ch => 
+              Math.abs(parseFloat(ch.number) - i) < 5 && 
+              (ch.id.includes('-chapter-') || ch.id.includes('-ch-'))
+            );
+            
+            if (nearbyChapters.length > 0) {
+              // Use the pattern from a nearby chapter
+              const template = nearbyChapters[0];
+              
+              // Handle various URL patterns
+              if (template.id.match(/\d+-volume-\d+-chapter-\d+/)) {
+                // Handle volume format like "7707927-volume-19-chapter-166"
+                // Extract volume number to maintain consistency
+                const volumeMatch = template.id.match(/volume-(\d+)/);
+                const volumeNum = volumeMatch ? volumeMatch[1] : '1';
+                
+                generatedId = `chapter-${i}`;
+                // Try to preserve the volume number in the URL
+                chapterUrl = template.url.replace(/\/\d+-volume-\d+-chapter-\d+$/, `/volume-${volumeNum}-${generatedId}`);
+              } else if (template.id.match(/\d+-chapter-\d+/)) {
+                // Handle simple chapter format like "9605874-chapter-345"
+                generatedId = `chapter-${i}`;
+                chapterUrl = template.url.replace(/\/\d+-chapter-\d+$/, `/${generatedId}`);
+              } else if (template.id.match(/\d+-ch-\d+/)) {
+                // Handle ch format like "2797954-ch-227"
+                generatedId = `ch-${i}`;
+                chapterUrl = template.url.replace(/\/\d+-ch-\d+$/, `/${generatedId}`);
+              } else {
+                // Generic fallback
+                generatedId = `chapter-${i}`;
+                chapterUrl = template.url.replace(/\/chapter-\d+$/, `/${generatedId}`);
+              }
+            } else {
+              // Fallback to basic URL
+              chapterUrl = `${this.baseUrl}/title/${mangaId}/${generatedId}`;
+            }
+            
+            // Add the generated chapter
+            const generatedChapter = {
+              id: generatedId,
+              title: `Chapter ${i}`,
+              number: i.toString(),
+              url: chapterUrl,
+              date: 'Unknown',
+              generated: true // Mark as generated
+            };
+            
+            chapterMap.set(i, generatedChapter);
+          }
+        }
+        
+        // Update chapters array with all values
+        chapters.push(...Array.from(chapterMap.values()));
+      } else {
+        // Just use the extracted chapters
+        chapters.push(...extractedChapters);
+      }
       
       // Sort chapters by chapter number (descending)
       chapters.sort((a, b) => (parseFloat(b.number) || 0) - (parseFloat(a.number) || 0));
       
-      console.log(`Found ${chapters.length} chapters for manga: ${title}`);
+      console.log(`Found ${extractedChapters.length} chapters directly on page`);
+      console.log(`Returning ${chapters.length} total chapters for manga: ${title}`);
       
       return {
         id: mangaId,
@@ -196,10 +330,19 @@ class MangaParkProvider {
     try {
       console.log(`Fetching chapter pages from MangaPark for chapter ID: ${chapterId}`);
       
-      // Use either the provided chapterId or check if it's a complete URL
-      const chapterUrl = chapterId.startsWith('http') 
-        ? chapterId 
-        : `${this.baseUrl}/title/${chapterId}`;
+      // Handle different formats of chapterId
+      let chapterUrl;
+      
+      if (chapterId.startsWith('http')) {
+        // Already a full URL
+        chapterUrl = chapterId;
+      } else if (chapterId.includes('/')) {
+        // Format like "mangaId/chapter-123" or "10953-en-one-piece/9427378-chapter-1137"
+        chapterUrl = `${this.baseUrl}/title/${chapterId}`;
+      } else {
+        // Assume it's just the unique chapter identifier
+        chapterUrl = `${this.baseUrl}/title/${chapterId}`;
+      }
       
       console.log(`Requesting URL: ${chapterUrl}`);
       
@@ -217,7 +360,7 @@ class MangaParkProvider {
         console.log(`Found ${jsonMatches.length} images in JSON data`);
         let index = 1;
         for (const match of jsonMatches) {
-          const imageUrl = match[1].replace(/\\u002F/g, '/');
+          const imageUrl = match[1].replace(/\\u002F/g, '/').replace(/\\\//g, '/');
           if (imageUrl && !pages.some(p => p.url === imageUrl)) {
             pages.push({
               url: imageUrl,

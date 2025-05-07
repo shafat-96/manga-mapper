@@ -40,8 +40,11 @@ class MangaBuddyProvider {
    */
   async search(query) {
     try {
+      // If query already contains plus signs, don't encode them again
+      const formattedQuery = query.includes('+') ? query : encodeURIComponent(query);
+      const searchUrl = `${this.baseUrl}/search?q=${formattedQuery}`;
+      
       console.log(`Searching MangaBuddy for: ${query}`);
-      const searchUrl = `${this.baseUrl}/search?q=${encodeURIComponent(query)}`;
       
       const html = await this.fetchHtml(searchUrl);
       const $ = cheerio.load(html);
@@ -98,58 +101,78 @@ class MangaBuddyProvider {
   async getMangaInfo(mangaId) {
     try {
       console.log(`Getting manga info for: ${mangaId}`);
+      const startTime = Date.now();
       const mangaUrl = `${this.baseUrl}/${mangaId}`;
       
       const html = await this.fetchHtml(mangaUrl);
-      const $ = cheerio.load(html);
+      console.log(`Fetch completed in ${Date.now() - startTime}ms`);
       
-      // Extract basic manga information
+      // OPTIMIZATION: Only load cheerio once and use it for everything
+      const $ = cheerio.load(html);
+      console.log(`Cheerio loaded in ${Date.now() - startTime}ms`);
+      
+      // OPTIMIZATION: Batch basic info extraction
       const title = $('.book-info .detail .name').text().trim();
       const image = $('.book-info .cover img').attr('src') || '';
-      
-      // Extract description
       const description = $('.book-info .summary .content').text().trim();
+      const status = $('.book-info .detail .meta-item:contains("Status:") span').text().trim();
+      const author = $('.book-info .detail .meta-item:contains("Author:") span').text().trim();
+      const rating = $('.book-info .detail .rating strong').text().trim();
       
-      // Extract genres
+      // Extract genres in one pass
       const genres = [];
       $('.book-info .detail .meta-item:contains("Genres:") span a').each((i, element) => {
         genres.push($(element).text().trim());
       });
       
-      // Extract status
-      const status = $('.book-info .detail .meta-item:contains("Status:") span').text().trim();
+      console.log(`Basic info extracted in ${Date.now() - startTime}ms`);
       
-      // Extract author
-      const author = $('.book-info .detail .meta-item:contains("Author:") span').text().trim();
+      // ULTRA-FAST: Use regex directly on HTML to find latest chapter number
+      let latestChapter = 1;
       
-      // Extract rating
-      const rating = $('.book-info .detail .rating strong').text().trim();
-      
-      // Extract chapters
-      const chapters = [];
-      $('.chapter-list li').each((i, element) => {
-        const $element = $(element);
-        const linkElement = $element.find('a');
-        
-        if (linkElement.length > 0) {
-          const href = linkElement.attr('href');
-          const chapterTitle = linkElement.find('.chapter-title').text().trim();
-          const chapterNumber = chapterTitle.replace(/Chapter\s+/i, '').trim();
-          const updateDate = linkElement.find('.chapter-update').text().trim();
-          
-          // Create chapter ID in the format "chapter-{chapter-number}"
-          const chapterId = `chapter-${chapterNumber}`;
-          
-          chapters.push({
-            id: chapterId,
-            title: chapterTitle,
-            number: chapterNumber,
-            url: this.baseUrl + href,
-            date: updateDate
-          });
+      // Method 1: Try to extract from chapter count in header using regex
+      const chapterCountMatch = html.match(/CHAPTERS\s*\((\d+)\)/i);
+      if (chapterCountMatch && chapterCountMatch[1]) {
+        latestChapter = parseInt(chapterCountMatch[1], 10);
+        console.log(`Using chapter count from header: ${latestChapter}`);
+      } else {
+        // Method 2: Look for highest chapter in href using regex
+        const chapterMatches = Array.from(html.matchAll(/href="\/[^"]+\/chapter-(\d+)"/g));
+        for (const match of chapterMatches) {
+          if (match[1]) {
+            const num = parseInt(match[1], 10);
+            if (!isNaN(num) && num > latestChapter) {
+              latestChapter = num;
+            }
+          }
         }
-      });
+        console.log(`Found highest chapter from links: ${latestChapter}`);
+      }
       
+      console.log(`Latest chapter (${latestChapter}) found in ${Date.now() - startTime}ms`);
+      
+      // OPTIMIZATION: Use faster chapter generation with array pre-allocation
+      // Pre-allocate array for better performance with large chapter counts
+      const chaptersCount = latestChapter;
+      const chapters = new Array(chaptersCount);
+      
+      // Generate all chapters in one optimized loop (newest first)
+      const urlPrefix = `${this.baseUrl}/${mangaId}/chapter-`;
+      for (let i = 0; i < chaptersCount; i++) {
+        const chapterNum = latestChapter - i;
+        chapters[i] = {
+          id: `chapter-${chapterNum}`,
+          title: `Chapter ${chapterNum}`,
+          number: String(chapterNum),
+          url: urlPrefix + chapterNum,
+          date: chapterNum === latestChapter ? 'Recent' : 'Unknown'
+        };
+      }
+      
+      const endTime = Date.now();
+      console.log(`Generated ${chapters.length} chapters in ${endTime - startTime}ms`);
+      
+      // Return the final manga info
       return {
         id: mangaId,
         title: title,

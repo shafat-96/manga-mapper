@@ -114,8 +114,8 @@ app.get('/mangapark/pages/:chapterId', async (req, res) => {
   }
 });
 
-// Fetch chapter pages from MangaPark by manga ID and chapter ID
-app.get('/mangapark/pages/:mangaId/:chapterId', async (req, res) => {
+// Add new route for title format
+app.get('/mangapark/pages/title/:mangaId/:chapterId', async (req, res) => {
   try {
     const { mangaId, chapterId } = req.params;
     

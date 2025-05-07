@@ -244,11 +244,17 @@ class Mapper {
       }
     }
     
-    if (!bestMatch || highestSimilarity < 0.3) { // Lower threshold for accepting a match
-      // If no good match, just use the first result
+    if (!bestMatch || highestSimilarity < 0.4) { // Increased threshold from 0.3 to 0.4
+      // If no good match, inform about low similarity and use the first result
+      console.log(`No manga found with sufficient similarity (threshold: 0.4, highest: ${highestSimilarity.toFixed(5)})`);
+      
+      if (results.length > 0) {
       bestMatch = results[0];
-      console.log(`No similar manga found, using first result: ${bestMatch.title}`);
+        console.log(`Using first result as fallback: ${bestMatch.title}`);
       return bestMatch;
+      } else {
+        throw new Error(`No manga results found to match with title: ${title}`);
+      }
     }
     
     console.log(`Found best match: ${bestMatch.title} (ID: ${bestMatch.id}), similarity: ${highestSimilarity} with ${matchSource}`);
@@ -288,19 +294,18 @@ class Mapper {
       // Step 1: Get anime info from Anilist
       const animeInfo = await this.anilist.getInfo(anilistId);
       
-      // Get all possible titles to search with
+      // Get main title to search with
       const searchTitle = animeInfo.title.english || animeInfo.title.romaji || animeInfo.title.native;
       
-      // Extract synonyms from Anilist if available
+      // Extract ONLY the true synonyms from Anilist, don't include alt titles
       let synonyms = [];
       if (animeInfo.synonyms && Array.isArray(animeInfo.synonyms)) {
-        synonyms = animeInfo.synonyms;
-      }
-      
-      // Also use alternative titles as potential synonyms
-      if (animeInfo.title) {
-        const altTitles = Object.values(animeInfo.title).filter(Boolean);
-        synonyms = [...new Set([...synonyms, ...altTitles])];
+        // Filter out empty synonyms and those that match the main title
+        synonyms = animeInfo.synonyms.filter(synonym => 
+          synonym && 
+          synonym.trim() !== '' && 
+          synonym.toLowerCase() !== searchTitle.toLowerCase()
+        );
       }
       
       console.log(`Searching for manga on AsuraScans: ${searchTitle}`);
@@ -344,19 +349,18 @@ class Mapper {
       // Step 1: Get anime info from Anilist
       const animeInfo = await this.anilist.getInfo(anilistId);
       
-      // Get all possible titles to search with
+      // Get main title to search with
       const searchTitle = animeInfo.title.english || animeInfo.title.romaji || animeInfo.title.native;
       
-      // Extract synonyms from Anilist if available
+      // Extract ONLY the true synonyms from Anilist, don't include alt titles
       let synonyms = [];
       if (animeInfo.synonyms && Array.isArray(animeInfo.synonyms)) {
-        synonyms = animeInfo.synonyms;
-      }
-      
-      // Also use alternative titles as potential synonyms
-      if (animeInfo.title) {
-        const altTitles = Object.values(animeInfo.title).filter(Boolean);
-        synonyms = [...new Set([...synonyms, ...altTitles])];
+        // Filter out empty synonyms and those that match the main title
+        synonyms = animeInfo.synonyms.filter(synonym => 
+          synonym && 
+          synonym.trim() !== '' && 
+          synonym.toLowerCase() !== searchTitle.toLowerCase()
+        );
       }
       
       console.log(`Searching for manga on MangaPark: ${searchTitle}`);
@@ -395,23 +399,27 @@ class Mapper {
   // Method to search using MangaBuddy
   async searchMangaBuddy(title, synonyms = []) {
     try {
-      console.log(`Searching for manga on MangaBuddy: ${title}`);
+      // Format search query by replacing spaces with plus signs
+      const formattedTitle = title.replace(/\s+/g, '+');
       
-      // Use the MangaBuddy provider to search for manga
-      const searchResults = await this.mangabuddy.search(title);
+      // Format all synonyms with plus signs
+      const formattedSynonyms = synonyms.map(synonym => synonym.replace(/\s+/g, '+'));
+      
+      // Use the MangaBuddy provider to search for manga directly with the formatted title
+      const searchResults = await this.mangabuddy.search(formattedTitle);
       
       if (!searchResults || !searchResults.results || searchResults.results.length === 0) {
         // If no results found with main title, try synonyms if available
-        if (synonyms && synonyms.length > 0) {
-          console.log(`No results with main title. Trying synonyms: ${synonyms.join(', ')}`);
+        if (formattedSynonyms && formattedSynonyms.length > 0) {
+          console.log(`No results with main title. Trying synonyms with plus-sign format...`);
           
-          // Try each synonym until we find results
-          for (const synonym of synonyms) {
-            console.log(`Trying synonym: ${synonym}`);
-            const synonymResults = await this.mangabuddy.search(synonym);
+          // Try each formatted synonym until we find results
+          for (const formattedSynonym of formattedSynonyms) {
+            console.log(`Trying synonym: ${formattedSynonym}`);
+            const synonymResults = await this.mangabuddy.search(formattedSynonym);
             
             if (synonymResults && synonymResults.results && synonymResults.results.length > 0) {
-              console.log(`Found ${synonymResults.results.length} results using synonym: ${synonym}`);
+              console.log(`Found ${synonymResults.results.length} results using synonym: ${formattedSynonym}`);
               return this.findBestMatch(synonymResults.results, title, synonyms);
             }
           }
@@ -449,28 +457,49 @@ class Mapper {
       // Step 1: Get anime info from Anilist
       const animeInfo = await this.anilist.getInfo(anilistId);
       
-      // Get all possible titles to search with
+      // Get main title to search with
       const searchTitle = animeInfo.title.english || animeInfo.title.romaji || animeInfo.title.native;
       
-      // Extract synonyms from Anilist if available
+      // Format the search title by replacing spaces with plus signs
+      const formattedSearchTitle = searchTitle.replace(/\s+/g, '+');
+      
+      // Extract ONLY the true synonyms from Anilist, don't include alt titles
       let synonyms = [];
       if (animeInfo.synonyms && Array.isArray(animeInfo.synonyms)) {
-        synonyms = animeInfo.synonyms;
+        // Filter out empty synonyms and those that match the main title
+        synonyms = animeInfo.synonyms.filter(synonym => 
+          synonym && 
+          synonym.trim() !== '' && 
+          synonym.toLowerCase() !== searchTitle.toLowerCase()
+        );
       }
       
-      // Also use alternative titles as potential synonyms
-      if (animeInfo.title) {
-        const altTitles = Object.values(animeInfo.title).filter(Boolean);
-        synonyms = [...new Set([...synonyms, ...altTitles])];
-      }
+      console.log(`Searching for manga on MangaBuddy: ${formattedSearchTitle}`);
       
-      console.log(`Searching for manga on MangaBuddy: ${searchTitle}`);
-      if (synonyms.length > 0) {
-        console.log(`Also trying synonyms: ${synonyms.join(', ')}`);
-      }
-      
-      // Step 2: Search for manga on MangaBuddy using the title and synonyms
-      const bestMatch = await this.searchMangaBuddy(searchTitle, synonyms);
+      try {
+        // First try searching with the main title
+        const searchResults = await this.mangabuddy.search(formattedSearchTitle);
+        
+        if (searchResults && searchResults.results && searchResults.results.length > 0) {
+          console.log(`Found ${searchResults.results.length} results with main title`);
+          
+          // Check if there's a good match with similarity >= 0.5
+          let bestMatch = null;
+          let highestSimilarity = 0;
+          
+          for (const manga of searchResults.results) {
+            const similarity = this.stringSimilarity(manga.title, searchTitle);
+            if (similarity > highestSimilarity) {
+              highestSimilarity = similarity;
+              bestMatch = manga;
+            }
+          }
+          
+          console.log(`Best main title match: ${bestMatch?.title || 'None'}, similarity: ${highestSimilarity}`);
+          
+          // If we found a match with similarity >= 0.5, use it
+          if (bestMatch && highestSimilarity >= 0.5) {
+            console.log(`Using main title match with similarity ${highestSimilarity}`);
       
       // Step 3: Get full manga info with chapters from MangaBuddy
       const mangaBuddyInfo = await this.getMangaBuddyInfo(bestMatch.id);
@@ -492,6 +521,121 @@ class Mapper {
           chapters: mangaBuddyInfo.chapters || []
         }
       };
+          } else {
+            console.log(`No main title match with similarity >= 0.5, trying synonyms`);
+            throw new Error('No main title match with sufficient similarity');
+          }
+        } else {
+          throw new Error('No results found with main title');
+        }
+        
+      } catch (error) {
+        // If main title search failed or had low similarity, try synonyms
+        if (synonyms.length > 0) {
+          console.log(`Main title search issue: ${error.message}`);
+          console.log(`Trying with synonyms: ${synonyms.join(', ')}`);
+          
+          // Try each synonym until we find a good match
+          for (const synonym of synonyms) {
+            try {
+              const formattedSynonym = synonym.replace(/\s+/g, '+');
+              console.log(`Searching with synonym: ${formattedSynonym}`);
+              
+              const synonymResults = await this.mangabuddy.search(formattedSynonym);
+              
+              if (synonymResults && synonymResults.results && synonymResults.results.length > 0) {
+                console.log(`Found ${synonymResults.results.length} results with synonym: ${synonym}`);
+                
+                // Check for a good match with this synonym
+                let bestSynonymMatch = null;
+                let highestSynonymSimilarity = 0;
+                
+                for (const manga of synonymResults.results) {
+                  // First check similarity with the synonym itself
+                  const similarityToSynonym = this.stringSimilarity(manga.title, synonym);
+                  
+                  if (similarityToSynonym > highestSynonymSimilarity) {
+                    highestSynonymSimilarity = similarityToSynonym;
+                    bestSynonymMatch = manga;
+                  }
+                  
+                  // Also check similarity with main title
+                  const similarityToMain = this.stringSimilarity(manga.title, searchTitle);
+                  if (similarityToMain > highestSynonymSimilarity) {
+                    highestSynonymSimilarity = similarityToMain;
+                    bestSynonymMatch = manga;
+                  }
+                }
+                
+                console.log(`Best match with synonym "${synonym}": ${bestSynonymMatch?.title || 'None'}, similarity: ${highestSynonymSimilarity}`);
+                
+                // If we found a match with reasonable similarity, use it
+                if (bestSynonymMatch && highestSynonymSimilarity >= 0.4) {
+                  // Get full manga info with chapters
+                  const mangaBuddyInfo = await this.getMangaBuddyInfo(bestSynonymMatch.id);
+                  
+                  // Return the mapped information with chapters
+                  return {
+                    anilist: {
+                      id: anilistId,
+                      title: animeInfo.title.english || animeInfo.title.romaji
+                    },
+                    mangabuddy: {
+                      id: bestSynonymMatch.id,
+                      title: bestSynonymMatch.title,
+                      image: bestSynonymMatch.image,
+                      description: mangaBuddyInfo.description,
+                      author: mangaBuddyInfo.author,
+                      status: mangaBuddyInfo.status,
+                      genres: mangaBuddyInfo.genres || [],
+                      chapters: mangaBuddyInfo.chapters || []
+                    }
+                  };
+                }
+              }
+            } catch (synonymError) {
+              console.log(`Error searching with synonym ${synonym}: ${synonymError.message}`);
+              // Continue to the next synonym
+            }
+          }
+        }
+        
+        // If no good matches with main title or synonyms, use the best available match
+        // from the original search results if any were found
+        try {
+          console.log(`No good matches with synonyms, falling back to best available match`);
+          const fallbackResults = await this.mangabuddy.search(formattedSearchTitle);
+          
+          if (fallbackResults && fallbackResults.results && fallbackResults.results.length > 0) {
+            const fallbackMatch = fallbackResults.results[0]; // Just use the first result
+            console.log(`Using fallback match: ${fallbackMatch.title}`);
+            
+            const mangaBuddyInfo = await this.getMangaBuddyInfo(fallbackMatch.id);
+            
+            return {
+              anilist: {
+                id: anilistId,
+                title: animeInfo.title.english || animeInfo.title.romaji
+              },
+              mangabuddy: {
+                id: fallbackMatch.id,
+                title: fallbackMatch.title,
+                image: fallbackMatch.image,
+                description: mangaBuddyInfo.description,
+                author: mangaBuddyInfo.author,
+                status: mangaBuddyInfo.status,
+                genres: mangaBuddyInfo.genres || [],
+                chapters: mangaBuddyInfo.chapters || []
+              }
+            };
+          }
+        } catch (fallbackError) {
+          console.log(`Fallback search failed: ${fallbackError.message}`);
+        }
+        
+        // If we get here, nothing worked
+        throw new Error(`Could not find manga on MangaBuddy with title: ${searchTitle} or any synonyms`);
+      }
       
     } catch (error) {
       console.error("MangaBuddy mapping error:", error);
@@ -547,19 +691,23 @@ class Mapper {
       // Step 1: Get anime info from Anilist
       const animeInfo = await this.anilist.getInfo(anilistId);
       
-      // Get all possible titles to search with
+      // Get main title to search with
       const searchTitle = animeInfo.title.english || animeInfo.title.romaji || animeInfo.title.native;
       
-      // Extract synonyms from Anilist if available
+      // Extract ONLY the true synonyms from Anilist, don't include alt titles
       let synonyms = [];
       if (animeInfo.synonyms && Array.isArray(animeInfo.synonyms)) {
-        synonyms = animeInfo.synonyms.filter(Boolean);
+        // Filter out empty synonyms and those that match the main title
+        synonyms = animeInfo.synonyms.filter(synonym => 
+          synonym && 
+          synonym.trim() !== '' && 
+          synonym.toLowerCase() !== searchTitle.toLowerCase()
+        );
       }
       
-      // Also use alternative titles as potential synonyms
-      if (animeInfo.title) {
-        const altTitles = Object.values(animeInfo.title).filter(Boolean);
-        synonyms = [...new Set([...synonyms, ...altTitles])];
+      console.log(`Searching for manga on MangaKakalot: ${searchTitle}`);
+      if (synonyms.length > 0) {
+        console.log(`Also trying synonyms: ${synonyms.join(', ')}`);
       }
       
       // Step 2: Search for manga on MangaKakalot using the title and synonyms
